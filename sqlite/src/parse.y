@@ -409,6 +409,8 @@ cmd ::= select(X).  {
 %destructor select {sqlite3SelectDelete(pParse->db, $$);}
 %type selectnowith {Select*}
 %destructor selectnowith {sqlite3SelectDelete(pParse->db, $$);}
+%type firstselect {Select*}
+%destructor firstselect {sqlite3SelectDelete(pParse->db, $$);}
 %type oneselect {Select*}
 %destructor oneselect {sqlite3SelectDelete(pParse->db, $$);}
 
@@ -434,7 +436,7 @@ select(A) ::= with(W) selectnowith(X). {
   A = p;
 }
 
-selectnowith(A) ::= oneselect(X).                      {A = X;}
+selectnowith(A) ::= firstselect(X).                    {A = X;}
 %ifndef SQLITE_OMIT_COMPOUND_SELECT
 selectnowith(A) ::= selectnowith(X) multiselect_op(Y) oneselect(Z).  {
   Select *pRhs = Z;
@@ -460,6 +462,11 @@ multiselect_op(A) ::= UNION ALL.             {A = TK_ALL;}
 multiselect_op(A) ::= EXCEPT|INTERSECT(OP).  {A = @OP;}
 multiselect_op(A) ::= .                      {A = TK_ALL;}
 %endif SQLITE_OMIT_COMPOUND_SELECT
+firstselect(A) ::= IS distinct(D) nostar(W) nofrom(X) where_opt(Y)
+                 groupby_opt(P) having_opt(Q) orderby_opt(Z) limit_opt(L). {
+  A = sqlite3SelectNew(pParse,W,X,Y,P,Q,Z,D,L.pLimit,L.pOffset);
+}
+firstselect(A) ::= oneselect(X).             {A = X;}
 oneselect(A) ::= SELECT distinct(D) selcollist(W) from(X) where_opt(Y)
                  groupby_opt(P) having_opt(Q) orderby_opt(Z) limit_opt(L). {
   A = sqlite3SelectNew(pParse,W,X,Y,P,Q,Z,D,L.pLimit,L.pOffset);
@@ -489,6 +496,15 @@ values(A) ::= values(X) COMMA LP exprlist(Y) RP. {
 distinct(A) ::= DISTINCT.   {A = SF_Distinct;}
 distinct(A) ::= ALL.        {A = 0;}
 distinct(A) ::= .           {A = 0;}
+
+// nostar is for no "SELECT * FROM" statement.
+//
+%type nostar {ExprList*}
+%destructor nostar {sqlite3ExprListDelete(pParse->db, $$);}
+nostar(A) ::= . {
+  Expr *p = sqlite3Expr(pParse->db, TK_ALL, 0);
+  A = sqlite3ExprListAppend(pParse, 0, p);
+}
 
 // selcollist is a list of expressions that are to become the return
 // values of the SELECT statement.  The "*" in statements like
@@ -532,11 +548,20 @@ as(X) ::= .            {X.n = 0;}
 %destructor stl_prefix {sqlite3SrcListDelete(pParse->db, $$);}
 %type from {SrcList*}
 %destructor from {sqlite3SrcListDelete(pParse->db, $$);}
+%type nofrom {SrcList*}
+%destructor nofrom {sqlite3SrcListDelete(pParse->db, $$);}
 
 // A complete FROM clause.
 //
 from(A) ::= .                {A = sqlite3DbMallocZero(pParse->db, sizeof(*A));}
 from(A) ::= FROM seltablist(X). {
+  A = X;
+  sqlite3SrcListShiftJoinType(A);
+}
+
+// nofrom is for no "SELECT * FROM" statement.
+//
+nofrom(A) ::= seltablist(X). {
   A = X;
   sqlite3SrcListShiftJoinType(A);
 }
